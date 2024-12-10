@@ -12,8 +12,8 @@ class Q_ShareScale_VGG8(nn.Module):
         super(Q_ShareScale_VGG8, self).__init__()
 
         #### Set bitwidth for quantization
-        self.num_bits_w = 2
-        self.num_bits_u = 2
+        self.num_bits_w = args.quant
+        self.num_bits_u = args.quant
 
         #### Print out the parameters for quantization
 

@@ -24,8 +24,7 @@ def get_args():
     parser.add_argument("--num_workers", default=10, type=int, help="number of workers")
     parser.add_argument("--train_display_freq", default=1, type=int, help="display_freq for train")
     parser.add_argument("--test_display_freq", default=1, type=int, help="display_freq for test")
-    # parser.add_argument("--setting", type=str, help="display_freq for test")
-    # parser.add_argument('--quant', default=4, type=int, help='quantization-bits')
+    parser.add_argument('--quant', default=2, type=int, help='quantization-bits')
     args = parser.parse_args()
 
     return args

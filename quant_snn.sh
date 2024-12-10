@@ -1,7 +1,7 @@
 #!/bin/bash
 
 train_and_shutdown() {
-    python train_snn.py $@
+    python train_snn_acc.py $@
 }
 
 case "$1" in
