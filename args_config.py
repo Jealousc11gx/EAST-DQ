@@ -1,8 +1,6 @@
 import argparse
 
-# usage 4 mint python train_snn_ws.py --arch vgg8 -wq -uq -share -sft_rst
 
-# python train_snn_ws.py --arch vgg8 -wq -uq -share -sft_rst && /usr/bin/shutdown
 def get_args():
     parser = argparse.ArgumentParser("UQSNN")
 

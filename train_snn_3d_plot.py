@@ -1,8 +1,6 @@
 import os
-
 import dill
 import numpy as np
-
 from quant_net import *
 from training_utils import *
 import tracemalloc
@@ -17,6 +15,7 @@ import random
 import csv
 from mpl_toolkits.mplot3d import Axes3D
 import pickle
+
 
 def main():
     torch.manual_seed(23)
@@ -60,10 +59,9 @@ def main():
             drop_last=True,
             num_workers=4,
             pin_memory=True)
-        # test data loader have changed
         test_data_loader = torch.utils.data.DataLoader(
             dataset=test_dataset,
-            batch_size=256,
+            batch_size=128,
             shuffle=True,
             drop_last=False,
             num_workers=4,
@@ -178,6 +176,7 @@ def main():
                 }
 
         return weight_tracking
+
     # ******************************weight-trans-plot************************
 
     def plot_transition_pie(weight_tracking, segment_name):
@@ -237,151 +236,260 @@ def main():
                         bbox_inches='tight')
             plt.close()
 
-        # other visualization
-    def plot_average_transition_vs_batch(weight_tracking, segment_name):
-        os.makedirs(f'plots/average_transition_vs_batch/{segment_name}', exist_ok=True)
-        
-        for name, data in weight_tracking.items():
-            transitions = data.get('transitions', [])
-            if len(transitions) == 0:
-                print(f"No transitions data for layer: {name} in segment {segment_name}")
-                continue
-    
-            transitions = np.array(transitions)  # 将列表转换为NumPy数组，形状为 (num_batches_total, 3, 3)
-            labels = ['s1->s1', 's1->s2', 's1->s3', 's2->s1', 's2->s2', 's2->s3', 's3->s1', 's3->s2', 's3->s3']
-    
-            # 平均三个阶段的状态转移，假设 transitions 维度为 (num_batches_total, 3, 3)
-            num_stages = 3
-            batches_per_stage = 10
-            avg_transition_per_batch = []
-    
-            # 遍历所有批次并计算每个批次在三个阶段的平均状态转移
-            for batch_idx in range(batches_per_stage):
-                stage_transitions = []
-                for stage in range(num_stages):
-                    start_idx = stage * batches_per_stage
-                    end_idx = start_idx + batches_per_stage
-                    stage_transitions.append(transitions[start_idx:end_idx][batch_idx])
-                avg_transition = np.mean(stage_transitions, axis=0)
-                avg_transition_per_batch.append(avg_transition.reshape(-1))
-    
-            avg_transition_per_batch = np.array(avg_transition_per_batch)  # 形状为 (batches_per_stage, 9)
-    
-            # 保存画图数据
-            plot_data = {'avg_transition_per_batch': avg_transition_per_batch, 'labels': labels}
-            with open(f'plots/average_transition_vs_batch/{segment_name}/average_transition_vs_batch_{name}_data.pkl', 'wb') as f:
-                pickle.dump(plot_data, f)
-            
-            # 绘制状态转移随batch变化的3D折线图
-            fig = plt.figure(figsize=(15, 10))
-            ax = fig.add_subplot(111, projection='3d')
-            
-            x = np.arange(batches_per_stage)  # 批次编号 (0 到 9)
-            y = np.arange(len(labels))  # 状态转移类型编号 (0 到 8)
+
+
+    def plot_average_transition_vs_batch_combined(weight_tracking_segments, segment_names):
+        os.makedirs(f'test_plots/average_transition_vs_batch/combined_comparison', exist_ok=True)
+
+        # 遍历所有层
+        for name in weight_tracking_segments[segment_names[0]]:
+            fig, axs = plt.subplots(1, len(segment_names) + 1, figsize=(25, 10), subplot_kw={'projection': '3d'})
+            fig.suptitle(f'Average State Transition per Batch - Layer {name}', fontsize=16)
+
+            all_batches_transition = []
+
+            # 遍历每个阶段，收集每个阶段的 transition 矩阵
+            for i, segment_name in enumerate(segment_names):
+                weight_tracking = weight_tracking_segments[segment_name]
+                data = weight_tracking[name]
+                transitions = data.get('transitions', [])
+                if len(transitions) == 0:
+                    print(f"No transitions data for layer: {name} in segment {segment_name}")
+                    continue
+
+                # 将当前阶段的所有批次的 transition 矩阵添加到 all_batches_transition 中
+                all_batches_transition.append(transitions)  # transitions 形状为 (9, 3, 3)
+
+                # 转换为 NumPy 数组，形状为 (9, 3, 3)
+                transitions = np.array(transitions)
+
+                # 展平每个批次的平均转移矩阵，得到形状为 (9, 9)
+                transition_per_batch_flattened = transitions.reshape(9, -1)
+
+                # 计算每个批次中每种状态转移的比例，并转换为百分比
+                transition_percentage = transition_per_batch_flattened / transition_per_batch_flattened.sum(axis=1,
+                                                                                                            keepdims=True) * 100
+
+                # 绘制3D条形图
+                ax = axs[i]
+                x = np.arange(9)  # 9 个批次编号
+                y = np.arange(9)  # 状态转移类型编号 (0 到 8 对应 9 种类型)
+                X, Y = np.meshgrid(x, y)
+                Z = transition_percentage.T  # 转置后形状为 (9, 9)，用于绘图
+
+                labels = ['s11', 's12', 's13', 's21', 's22', 's23', 's31', 's32', 's33']
+                colors = plt.cm.viridis(np.linspace(0, 1, len(y)))
+
+                width = 0.3  # 设置条形图的宽度
+                for j in range(len(y)):
+                    ax.bar(x, Z[j], zs=j, zdir='y', width=width, color=colors[j], alpha=0.8)
+                    ax.plot(x, np.full(len(x), j), Z[j], color=colors[j], marker='o', linestyle='--', linewidth=2)
+
+                ax.set_xlabel('Batch Index')
+                ax.set_ylabel('State Transition Type')
+                ax.set_zlabel('Average Transition Proportion (%)')
+                ax.set_xticks(np.arange(len(x)))
+                ax.set_xticklabels(np.arange(len(x)))
+                ax.set_yticks(np.arange(len(labels)))
+                ax.set_yticklabels(labels, rotation=45, ha='center', va='center')
+                ax.set_title(f'Segment {segment_name}')
+                plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
+
+            # 对阶段进行平均，得到形状为 (9, 3, 3)
+            avg_transition_per_batch = np.mean(all_batches_transition, axis=0)
+
+            # 展平每个批次的平均转移矩阵，得到形状为 (9, 9)
+            avg_transition_per_batch_flattened = avg_transition_per_batch.reshape(9, -1)
+
+            # 计算每个批次中每种状态转移的比例，并转换为百分比
+            avg_transition_percentage = avg_transition_per_batch_flattened / avg_transition_per_batch_flattened.sum(
+                axis=1, keepdims=True) * 100
+
+            # 绘制平均的3D条形图
+            ax = axs[-1]
+            x = np.arange(9)  # 9 个批次编号
+            y = np.arange(9)  # 状态转移类型编号 (0 到 8 对应 9 种类型)
             X, Y = np.meshgrid(x, y)
-            Z = avg_transition_per_batch.T  # 转置后形状为 (9, batches_per_stage)，以适应绘图
-            
-            # 绘制3D折线图
-            for i in range(len(labels)):
-                ax.plot(x, np.full(batches_per_stage, i), Z[i], label=labels[i], marker='o', linestyle='-', linewidth=1)
-            
-            ax.set_xlabel('Batch Number (0-9)')
+            Z = avg_transition_percentage.T  # 转置后形状为 (9, 9)，用于绘图
+
+            colors = plt.cm.viridis(np.linspace(0, 1, len(y)))
+
+            width = 0.3  # 设置条形图的宽度
+            for j in range(len(y)):
+                ax.bar(x, Z[j], zs=j, zdir='y', width=width, color=colors[j], alpha=0.8, bottom=0)
+                ax.plot(x, np.full(len(x), j), Z[j], color=colors[j], marker='o', linestyle='--', linewidth=2)
+
+            ax.set_xlabel('Batch Index')
             ax.set_ylabel('State Transition Type')
-            ax.set_zlabel('Average Transition Percentage')
+            ax.set_zlabel('Average Transition Proportion (%)')
+            ax.set_xticks(np.arange(len(x)))
+            ax.set_xticklabels(np.arange(len(x)))
             ax.set_yticks(np.arange(len(labels)))
-            ax.set_yticklabels(labels, rotation=45, ha='right')
-            ax.set_title(f'Average State Transition vs Batch - Layer {name} - Segment {segment_name}')
-            ax.legend()
-            
-            plt.tight_layout()
-            plt.savefig(f'plots/average_transition_vs_batch/{segment_name}/average_transition_vs_batch_{name}_3d.png', dpi=300)
+            ax.set_yticklabels(labels, rotation=45, ha='center', va='center')
+            ax.set_title(f'Average of All Segments')
+
+            plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
+            plt.savefig(
+                f'test_plots/average_transition_vs_batch/combined_comparison/average_transition_vs_batch_{name}_comparison.png',
+                dpi=300)
             plt.close()
 
 
-
-
-        
-    # 图2: 2D柱状图展示状态转移的平均比例
-    def plot_transition_bar(weight_tracking, segment_name):
-        os.makedirs(f'plots/transition_bar/{segment_name}', exist_ok=True)
-        for name, data in weight_tracking.items():
-            transitions = data.get('transitions', [])
-            if len(transitions) == 0:
-                print(f"No transitions data for layer: {name} in segment {segment_name}")
-                continue
-    
-            transitions = np.array(transitions)  # 将列表转换为NumPy数组
-            avg_transition = np.mean(transitions, axis=0).flatten()  # 计算平均状态转移
-            labels = ['s1->s1', 's1->s2', 's1->s3', 's2->s1', 's2->s2', 's2->s3', 's3->s1', 's3->s2', 's3->s3']
-    
-            # 保存画图数据
-            plot_data = {'avg_transition': avg_transition, 'labels': labels}
-            with open(f'plots/transition_bar/{segment_name}/transition_bar_{name}_data.pkl', 'wb') as f:
-                pickle.dump(plot_data, f)
-    
-            plt.figure(figsize=(12, 6))
-            sns.barplot(x=labels, y=avg_transition * 100)  # 使用百分比表示
-            plt.xlabel('State Transition (sij)')
-            plt.ylabel('Average Transition Percentage (%)')
-            plt.title(f'Average State Transition - Layer {name}')
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
-            plt.savefig(f'plots/transition_bar/{segment_name}/transition_bar_{name}.png', dpi=300)
-            plt.close()
-    
-    # 图3: 权重状态随Batch变化的图
     def plot_weight_state_vs_batch(weight_tracking, segment_name):
-        os.makedirs(f'plots/weight_state_vs_batch/{segment_name}', exist_ok=True)
+        os.makedirs(f'test_plots/weight_state_vs_batch/{segment_name}', exist_ok=True)
         for name, data in weight_tracking.items():
             history = data.get('history', [])
             if len(history) == 0:
                 print(f"No history data for layer: {name} in segment {segment_name}")
                 continue
-    
+
             # 随机选择10个权重进行跟踪
             num_weights = 10
             num_batches = len(history)
             selected_indices = np.random.choice(len(history[0]['quantized']), num_weights, replace=False)
             weight_states = np.array([history[batch]['quantized'][selected_indices] for batch in range(num_batches)])
-            
+
             # 保留状态值为-1, 0, 1
             weight_states = np.clip(weight_states, -1, 1)
-    
+
             # 保存画图数据
             plot_data = {'weight_states': weight_states, 'num_batches': num_batches, 'num_weights': num_weights}
-            with open(f'plots/weight_state_vs_batch/{segment_name}/weight_state_vs_batch_{name}_data.pkl', 'wb') as f:
+            with open(f'test_plots/weight_state_vs_batch/{segment_name}/weight_state_vs_batch_{name}_data.pkl',
+                      'wb') as f:
                 pickle.dump(plot_data, f)
-            
+
+            # 创建图形
             fig = plt.figure(figsize=(15, 10))
             ax = fig.add_subplot(111, projection='3d')
-    
+
+            # 设置颜色
             colors = plt.cm.rainbow(np.linspace(0, 1, num_weights))
+
+            # 绘制权重状态变化图，增加线宽和标记大小
             for weight_index in range(num_weights):
                 x = np.arange(num_batches)
                 y = np.full(num_batches, weight_index)
                 z = weight_states[:, weight_index]
-    
-                ax.plot(x, y, z, color=colors[weight_index], marker='o', markersize=4, linestyle='-', linewidth=1)
-    
-            ax.set_xlabel('Batch Number', fontsize=12)
-            ax.set_ylabel('Weight Index', fontsize=12)
-            ax.set_zlabel('Weight State', fontsize=12)
+
+                # 绘制曲线，增加虚线和更显著的标记
+                ax.plot(x, y, z, color=colors[weight_index], marker='o', markersize=6, linestyle='--', linewidth=2)
+
+            # 设置轴标签和标题
+            ax.set_xlabel('Batch Number', fontsize=14, labelpad=15)
+            ax.set_ylabel('Weight Index', fontsize=14, labelpad=15)
+            ax.set_zlabel('Weight State', fontsize=14, labelpad=10)
             ax.set_yticks(range(num_weights))
             ax.set_zlim(-1.5, 1.5)
             ax.set_zticks([-1, 0, 1])
-            ax.set_title(f'Weight State Changes: {name} layer - Segment {segment_name}', fontsize=14)
-    
-            # 设置每个batch都显示
+            ax.set_title(f'Weight State Changes: {name} layer - Segment {segment_name}', fontsize=16, pad=20)
+
+            # 设置每个批次都显示
             ax.set_xticks(range(num_batches))
             ax.set_xticklabels(range(num_batches), rotation=45, ha='right')
-            plt.setp(ax.get_xticklabels(), visible=True, fontsize=8)
-    
+            plt.setp(ax.get_xticklabels(), visible=True, fontsize=10)
+
+            # 设置相机视角
+            ax.view_init(elev=25, azim=-60)  # 设置较好的观察角度，使得图形各部分更加清晰
+
+            # 增加网格线和整体布局
             ax.grid(True, linestyle='--', alpha=0.7)
-    
-            plt.tight_layout()
-            plt.savefig(f'plots/weight_state_vs_batch/{segment_name}/weight_state_vs_batch_{name}.png', dpi=300, bbox_inches='tight')
+
+            # 调整布局，确保没有部分被裁剪
+            plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+
+            # 保存图像
+            plt.savefig(f'test_plots/weight_state_vs_batch/{segment_name}/weight_state_vs_batch_{name}.png', dpi=300,
+                        bbox_inches='tight')
             plt.close()
 
+    def plot_weight_state_vs_batch_combine(weight_tracking_segments, segment_names):
+        """
+        绘制同一层在多个阶段的权重状态随批次的变化，结合子图展示。
+        """
+        os.makedirs(f'test_plots/weight_state_vs_batch_combined/', exist_ok=True)
+
+        # 获取所有段中共有的层名
+        layers = list(weight_tracking_segments[segment_names[0]].keys())
+
+        # 对每个层绘制多个阶段的变化
+        for name in layers:
+            fig = plt.figure(figsize=(18, 10))
+
+            # 创建多子图
+            num_segments = len(segment_names)
+            for i, segment_name in enumerate(segment_names):
+                weight_tracking = weight_tracking_segments[segment_name]
+                data = weight_tracking.get(name)
+                if not data:
+                    print(f"No data for layer: {name} in segment {segment_name}")
+                    continue
+
+                history = data.get('history', [])
+                if len(history) == 0:
+                    print(f"No history data for layer: {name} in segment {segment_name}")
+                    continue
+
+                # 随机选择10个权重进行跟踪
+                num_weights = 10
+                num_batches = len(history)
+                selected_indices = np.random.choice(len(history[0]['quantized']), num_weights, replace=False)
+                weight_states = np.array(
+                    [history[batch]['quantized'][selected_indices] for batch in range(num_batches)])
+
+                # 保留状态值为-1, 0, 1
+                weight_states = np.clip(weight_states, -1, 1)
+
+                # 保存数据到 CSV 文件
+                csv_filename = f'test_plots/weight_state_vs_batch_combined/weight_state_vs_batch_{name}_{segment_name}.csv'
+                with open(csv_filename, mode='w', newline='') as file:
+                    writer = csv.writer(file)
+                    writer.writerow(['Batch Index'] + [f'Weight {i}' for i in range(num_weights)])
+                    for batch_idx in range(num_batches):
+                        writer.writerow([batch_idx] + weight_states[batch_idx].tolist())
+
+                # 在子图中绘制
+                ax = fig.add_subplot(1, num_segments, i + 1, projection='3d')
+
+                # 设置颜色
+                colors = plt.cm.rainbow(np.linspace(0, 1, num_weights))
+
+                # 绘制权重状态变化图，增加线宽和标记大小
+                for weight_index in range(num_weights):
+                    x = np.arange(num_batches)
+                    y = np.full(num_batches, weight_index)
+                    z = weight_states[:, weight_index]
+
+                    # 绘制曲线，增加虚线和更显著的标记
+                    ax.plot(x, y, z, color=colors[weight_index], marker='o', markersize=6, linestyle='--', linewidth=2)
+
+                # 设置轴标签和标题
+                ax.set_xlabel('Batch Number', fontsize=10, labelpad=15)
+                ax.set_ylabel('Weight Index', fontsize=10, labelpad=15)
+                ax.set_zlabel('Weight State', fontsize=10, labelpad=10)
+                ax.set_yticks(range(num_weights))
+                ax.set_zlim(-1.5, 1.5)
+                ax.set_zticks([-1, 0, 1])
+                ax.set_title(f'Segment {segment_name}', fontsize=12, pad=20)
+
+                # 设置每个批次都显示
+                ax.set_xticks(range(num_batches))
+                ax.set_xticklabels(range(num_batches), rotation=45, ha='right')
+                plt.setp(ax.get_xticklabels(), visible=True, fontsize=8)
+
+                # 设置相机视角
+                ax.view_init(elev=25, azim=-60)
+
+                # 增加网格线
+                ax.grid(True, linestyle='--', alpha=0.7)
+
+            # 调整布局，确保没有部分被裁剪
+            plt.tight_layout()
+            plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.1)
+
+            # 保存合并后的图像
+            plt.savefig(f'test_plots/weight_state_vs_batch_combined/weight_state_vs_batch_combined_{name}.png', dpi=300,
+                        bbox_inches='tight')
+            plt.close()
 
     # ********************************* other visualization ****************************
     model = Q_ShareScale_VGG8(args.T, args.dataset).cuda()
@@ -407,7 +515,6 @@ def main():
         print(f"Pretrained weights not found at {pretrained_path}, train from scratch.")
 
     # ******************************load pre-train model********************************
-
 
     criterion = nn.CrossEntropyLoss()
     if args.optim == 'sgd':
@@ -443,61 +550,25 @@ def main():
             break
 
     for segment_name, weight_tracking_segment in weight_tracking_segments.items():
-
-
-        # plot_average_transition_vs_batch(weight_tracking_segment, segment_name)  # 绘制图1
-        # plot_transition_bar(weight_tracking_segment, segment_name)               # 绘制图2
-        # plot_weight_state_vs_batch(weight_tracking_segment, segment_name)
-        
-        plot_transition_pie(weight_tracking_segment, segment_name)
-        # plot_average_transition_pie(weight_tracking_segment, segment_name)
-        # generate_average_transition_csv(weight_tracking_segment, segment_name)
-
-        # layer_power = calculate_average_power(weight_tracking_segment, segment_name)
-        # plot_power_consumption(layer_power, segment_name)
-        # generate_power_consumption_csv(layer_power, segment_name)
-
+        plot_weight_state_vs_batch(weight_tracking_segment, segment_name)
+    plot_weight_state_vs_batch_combine(weight_tracking_segments, list(tracked_batches_segments.keys()))
+    plot_average_transition_vs_batch_combined(weight_tracking_segments, list(tracked_batches_segments.keys()))  # 绘制图1
+    print("Visualization has been Done!")
     # ********************************weights tracking*********************
 
 
-
 def train_batch(args, imgs, targets, model, criterion, optimizer, weight_tracking, batch_idx, track_flag):
-    """
-    执行一个训练批次的操作。
 
-    参数:
-    - args: 包含全局配置参数的对象。
-    - imgs: 一个批次的输入图像。
-    - targets: 输入图像对应的目标值。
-    - model: 要训练的模型。
-    - criterion: 损失函数。
-    - optimizer: 优化器。
-    - weight_tracking: 权重跟踪对象，用于记录模型权重的变化。
-    - batch_idx: 当前批次的索引。
-    - track_flag: 一个布尔值，指示是否跟踪权重变化。
-
-    返回:
-    - 返回更新后的权重跟踪对象。
-    """
-    # 将模型设置为训练模式
     model.train()
-    # 将图像和目标值移动到GPU
     imgs, targets = imgs.cuda(), targets.cuda()
-    # 清除优化器的梯度
     optimizer.zero_grad()
-    # 前向传播获取模型输出
     output = model(imgs)
-    # 计算损失值，使用输出的平均值除以温度参数
     loss = sum([criterion(s, targets) for s in output]) / args.T
-    # 反向传播计算梯度
     loss.backward()
-    # 更新模型权重
     optimizer.step()
-    # 更新权重跟踪对象
     if track_flag:
         weight_tracking = update_weight_tracking(model, weight_tracking, batch_idx)
     return weight_tracking
-
 
 
 def update_weight_tracking(model, weight_tracking, batch_idx):
