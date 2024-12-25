@@ -1,4 +1,4 @@
-<center><font size="18">Note: EAST-DQ Basic Usage</font></center>
+# Note: EAST-DQ Basic Usage
 
 In this note, we introduce how to use EAST-DQ , when we have device parameters. 
 
@@ -135,7 +135,10 @@ $$U_{i}^{l}[t]=\tau U_{i}^{l}[t-1]+S_{j}^{l-1}[t]$$
 
 where 𝜏 is the constant leaky factor, values from 0 to 1. if 𝜏 < 1, this is a LIF model, if  𝜏 = 1, this is a IF model. S ~j~^𝑙−1^ [𝑡] is the input spike from presynaptic neuron 𝑗 at time 𝑡. Neuron 𝑖 integrates inputs and emits a spike when its membrane potential exceeds the firing threshold. Mathematically, the spike generation function is stated as
 
-$$\left.S_{i}^{l}[t]=\left\{\begin{array}{cc}1,&\text{if   }U_{i}^{l}[t]\geq\theta,\\0,&\text{otherwise,}\end{array}\right.$$
+$$S_{i}^{l}[t]=\begin{cases}
+1, & \text{if } U_{i}^{l}[t] \ge \theta, \\
+0, & \text{otherwise.}
+\end{cases}$$
 
 where 𝜃 denotes the firing threshold parameter. Following each spike emission, the spiking neuron 𝑖 undergoes a reset mechanism that updates its membrane potential. The hard reset process is mathematically defined as,
 
