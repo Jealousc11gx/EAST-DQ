@@ -33,11 +33,8 @@ class LIFSpike(nn.Module):
     def forward(self, s, share, beta, bias):
 
         H = s + self.membrane_potential
-
-        # s = act(H-self.thresh)
         grad = ((1.0 - torch.abs(H - self.thresh)).clamp(min=0))
         s = (((H - self.thresh) > 0).float() - H * grad).detach() + H * grad.detach()
-        # s = (H -(self.thresh/beta)>0).float()
         if self.soft_reset:
             U = (H - s * self.thresh) * self.leak
         else:

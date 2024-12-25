@@ -39,6 +39,7 @@ def b_q(w, b):  # inference
     # print(torch.unique(w_hat))
     return w_hat * alpha / (2 ** (b - 1) - 1)
 
+
 def w_q_inference(w, b, alpha):
     w = torch.tanh(w)
     # alpha = w.data.abs().max()
