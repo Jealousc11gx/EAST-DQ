@@ -18,7 +18,7 @@ def get_args():
     parser.add_argument('-share', action='store_true')  # training use true, testing use false
     parser.add_argument('-sft_rst', action='store_true')  # soft or hard reset
     parser.add_argument('--epoch', type=int, default=125)
-    parser.add_argument("--seed", default=0, type=int, help="Random seed")
+    parser.add_argument("--seed", default=42, type=int, help="Random seed")
     parser.add_argument("--num_workers", default=10, type=int, help="number of workers")
     parser.add_argument("--train_display_freq", default=1, type=int, help="display_freq for train")
     parser.add_argument("--test_display_freq", default=1, type=int, help="display_freq for test")

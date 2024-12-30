@@ -5,13 +5,31 @@ import csv
 from quant_net import *
 from training_utils import *
 
+
 def main():
-    torch.manual_seed(23)
+    torch.manual_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cudnn.benchmark = True
     cudnn.deterministic = True
 
     ws_statistics = {}
+
+    layer_spikes = {
+        'ConvLif2': [],
+        'ConvLif3': [],
+        'ConvLif4': [],
+        'ConvLif5': [],
+        'ConvLif6': []
+    }
+
+    neuron_counts = {
+        'ConvLif2': 131072,
+        'ConvLif3': 65536,
+        'ConvLif4': 65536,
+        'ConvLif5': 32768,
+        'ConvLif6': 32768
+    }
+
 
     args = args_config.get_args()
     print("********** SNN simulation parameters **********")
@@ -44,7 +62,7 @@ def main():
 
         train_data_loader = torch.utils.data.DataLoader(
             dataset=train_dataset,
-            batch_size=16,  # 修改为更高的 batch_size
+            batch_size=17,
             shuffle=True,
             drop_last=True,
             num_workers=12,
@@ -66,7 +84,13 @@ def main():
         - output: 输出张量
         """
 
-        nonlocal ws_statistics
+        nonlocal ws_statistics, layer_spikes
+
+        module_name = next(name for name, mod in model.named_modules() if mod is module)
+
+        if module_name in ['ConvLif2', 'ConvLif3', 'ConvLif4', 'ConvLif5', 'ConvLif6']:
+            total_spikes = torch.sum(output).item()
+            layer_spikes[module_name].append(total_spikes)
 
         # 获取权重和输入
         weights, _ = w_q_inference(module.conv_module.weight, module.num_bits_w, module.beta[0])
@@ -82,31 +106,67 @@ def main():
         # 重塑权重形状为 [C_out, C_in * H_k * W_k]
         weights = weights.view(weights.shape[0], -1)
 
+        # 统计非零元素的数量
+        non_zero_count = torch.count_nonzero(weights)
+
+        # 计算元素总数
+        total_elements = torch.numel(weights)
+
+        # 计算比例
+        non_zero_ratio = non_zero_count.float() / total_elements
+
         # 扩展权重维度以便进行广播
         weights_expanded = weights.unsqueeze(0).unsqueeze(-1)
         input_patches_expanded = input_patches.unsqueeze(1)
 
         # 创建掩码以找到输入中的非零值
         input_nonzero_mask = input_patches_expanded != 0
+        input_zero_flag = input_patches_expanded == 0
 
         # 统计权重为 +1 且输入不为 0 的乘积次数
         count_w_pos_s = torch.sum((weights_expanded == 1) & input_nonzero_mask, dim=[2, 3])
 
+        # 统计权重为 +1 且输入为 0 的乘积次数
+        count_w_pos_s_non = torch.sum((weights_expanded == 1) & input_zero_flag, dim=[2, 3])
+
         # 统计权重为 -1 且输入不为 0 的乘积次数
         count_w_neg_s = torch.sum((weights_expanded == -1) & input_nonzero_mask, dim=[2, 3])
 
-        # 获取模块名称
-        module_name = next(name for name, mod in model.named_modules() if mod is module)
+        # 统计权重为 -1 且输入为 0 的乘积次数
+        count_w_neg_s_non = torch.sum((weights_expanded == -1) & input_zero_flag, dim=[2, 3])
+
+        # 统计权重为 0 且输入不为 0 的乘积次数
+        count_w_zero_s = torch.sum((weights_expanded == 0) & input_nonzero_mask, dim=[2, 3])
+
+        # 统计权重为 0 且输入为 0 的乘积次数
+        count_w_zero_s_non = torch.sum((weights_expanded == 0) & input_zero_flag, dim=[2, 3])
+
+        # total_spikes = 0
+        # for out in output:
+        #     total_spikes += torch.sum(out)
+        # # 计算神经元总数（batch_size * channels * height * width）
+        # # 因为是多个时间步输出，所以不需要除以 args.T
+        # num_neurons = torch.numel(output[0])
+        #
+        # # 计算平均脉冲发放率
+        # firing_rate = total_spikes / num_neurons / args.T
 
         # 仅统计特定的层（ConvLif2, ConvLif3, ConvLif4, ConvLif5, ConvLif6）
         if module_name in ['ConvLif2', 'ConvLif3', 'ConvLif4', 'ConvLif5', 'ConvLif6']:
             # 初始化统计字典（如果尚未初始化）
             if module_name not in ws_statistics:
-                ws_statistics[module_name] = {'W=1 & S!=0': 0, 'W=-1 & S!=0': 0}
+                ws_statistics[module_name] = {'W=1 & S!=0': 0, 'W=-1 & S!=0': 0, 'W=1 & S=0': 0, 'W=-1 & S=0': 0,
+                                              'W=0 & S=0': 0, 'W=0 & S!=0': 0, 'weight_sparsity': 0}
 
             # 更新统计信息
             ws_statistics[module_name]['W=1 & S!=0'] += count_w_pos_s.sum().item()
             ws_statistics[module_name]['W=-1 & S!=0'] += count_w_neg_s.sum().item()
+            ws_statistics[module_name]['W=1 & S=0'] += count_w_pos_s_non.sum().item()
+            ws_statistics[module_name]['W=-1 & S=0'] += count_w_neg_s_non.sum().item()
+            ws_statistics[module_name]['W=0 & S=0'] += count_w_zero_s_non.sum().item()
+            ws_statistics[module_name]['W=0 & S!=0'] += count_w_zero_s.sum().item()
+            ws_statistics[module_name]['weight_sparsity'] = non_zero_ratio.item()
+
 
     # ********************************* other visualization ****************************
     model = Q_ShareScale_VGG8(args.T, args.dataset).to(device)
@@ -118,21 +178,30 @@ def main():
             hooks.append(module.register_forward_hook(hook_fn))
 
     # ******************************load pre-train model********************************
-    pretrained_path = f"{os.getcwd()}/pretrain_models/temp/99_dict_2w2b_if_hard_fake.pth"
+    pretrained_path = f"{os.getcwd()}/pretrain_models/temp/24_dict_2w2b_if_hard_fake.pth"
     if os.path.exists(pretrained_path):
         print(f"Loading pretrained weights from {pretrained_path}")
-        pretrained_model = torch.load(pretrained_path)
-        if isinstance(pretrained_model, dict):
-            model.load_state_dict(pretrained_model)
-            print("Model loaded. First layer weights mean:", next(model.parameters()).mean().item())
-        else:
-            print(f"Unexpected type of loaded model: {type(pretrained_model)}")
+        try:
+            pretrained_model = torch.load(pretrained_path)
+            if isinstance(pretrained_model, Q_ShareScale_VGG8):
+                # 如果加载的是整个模型，获取其状态字典
+                model.load_state_dict(pretrained_model.state_dict())
+                print("Model loaded successfully from full model.")
+            elif isinstance(pretrained_model, dict):
+                # 如果加载的是状态字典
+                model.load_state_dict(pretrained_model)
+                print("Model loaded successfully from state dict.")
+            else:
+                print(f"Unexpected type of loaded model: {type(pretrained_model)}")
+            print("First layer weights mean:", next(model.parameters()).mean().item())
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
     else:
-        print(f"Pretrained weights not found at {pretrained_path}, train from scratch.")
+        print(f"Pretrained weights not found at {pretrained_path}, training from scratch.")
 
     # ****************************** Training Loop ********************************
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=0.9, weight_decay=5e-4)
+    optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=0.9)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch, eta_min=0)
 
     model.train()
@@ -162,10 +231,16 @@ def main():
     # 只保存特定 ConvLIF 层的累计 W * S 操作和
     with open(output_csv_path, mode='w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
-        csv_writer.writerow(['Layer Name', 'W=1 & S!=0', 'W=-1 & S!=0'])
+        csv_writer.writerow(['Layer Name', 'W=1 & S!=0', 'W=-1 & S!=0', 'W=1 & S=0', 'W=-1 & S=0', 'W=0 & S=0',
+                             'W=0 & S!=0', 'Weight Sparsity', 'Firing Rate'])
         for module_name, stats in ws_statistics.items():
             if stats:  # 确保统计数据存在
-                csv_writer.writerow([module_name, stats.get('W=1 & S!=0', 0), stats.get('W=-1 & S!=0', 0)])
+                total_spikes = sum(layer_spikes[module_name])
+                firing_rate = total_spikes / neuron_counts[module_name] if module_name in neuron_counts else 0
+                csv_writer.writerow([module_name, stats.get('W=1 & S!=0', 0), stats.get('W=-1 & S!=0', 0),
+                                     stats.get('W=1 & S=0', 0), stats.get('W=-1 & S=0', 0), stats.get('W=0 & S=0', 0),
+                                     stats.get('W=0 & S!=0', 0), stats.get('weight_sparsity', 0),
+                                     firing_rate])
     print("Ws computation statistics saved!")
 
 

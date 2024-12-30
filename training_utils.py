@@ -44,7 +44,7 @@ def w_q_inference(w, b, alpha):
     w = torch.tanh(w)
     # alpha = w.data.abs().max()
     # print(alpha)
-    w = torch.clamp(w/alpha,min=-1,max=1)
+    w = torch.clamp(w/alpha, min=-1, max=1)
     w = w*(2**(b-1)-1)
     w_hat = w.round()
     return w_hat, alpha/(2**(b-1)-1)

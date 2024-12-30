@@ -58,7 +58,7 @@ def main():
             batch_size=256,
             shuffle=True,
             drop_last=True,
-            num_workers=4,
+            num_workers=12,
             pin_memory=True)
         # test data loader have changed
         test_data_loader = torch.utils.data.DataLoader(
@@ -66,7 +66,7 @@ def main():
             batch_size=256,
             shuffle=True,
             drop_last=False,
-            num_workers=4,
+            num_workers=12,
             pin_memory=True)
 
         num_classes = 10
@@ -389,7 +389,7 @@ def main():
 
     # ******************************load pre-train model********************************
 
-    pretrained_path = f"{os.getcwd()}/pretrain_models/temp/99_dict_2w2b_if_hard.pth"
+    pretrained_path = f"{os.getcwd()}/pretrain_models/temp/0_dict_2w2b_if_hard.pth"
     if os.path.exists(pretrained_path):
         print(f"Loading pretrained weights from {pretrained_path}")
         pretrained_model = torch.load(pretrained_path)
@@ -438,16 +438,17 @@ def main():
                 weight_tracking_segments[segment_name] = train_batch(args, imgs, targets, model, criterion, optimizer,
                                                                      weight_tracking_segments[segment_name], batch_idx,
                                                                      track_flag)
-        # 如果已经超出了最大 tracked_batches 范围，退出循环
-        if batch_idx > max(max(batches) for batches in tracked_batches_segments.values()):
-            break
+                break
+        if not track_flag:
+            train_batch(args, imgs, targets, model, criterion, optimizer,
+                        None, batch_idx, track_flag)
 
     for segment_name, weight_tracking_segment in weight_tracking_segments.items():
 
 
-        plot_average_transition_vs_batch(weight_tracking_segment, segment_name)  # 绘制图1
-        plot_transition_bar(weight_tracking_segment, segment_name)               # 绘制图2
-        plot_weight_state_vs_batch(weight_tracking_segment, segment_name)
+        # plot_average_transition_vs_batch(weight_tracking_segment, segment_name)  # 绘制图1
+        # plot_transition_bar(weight_tracking_segment, segment_name)               # 绘制图2
+        # plot_weight_state_vs_batch(weight_tracking_segment, segment_name)
 
         plot_transition_pie(weight_tracking_segment, segment_name)
         plot_average_transition_pie(weight_tracking_segment, segment_name)

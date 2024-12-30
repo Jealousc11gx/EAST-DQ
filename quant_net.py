@@ -321,6 +321,7 @@ class Q_ShareScale_VGG8(nn.Module):
 
             s = self.ConvLif3(s)
 
+
             s = self.ConvLif4(s)
 
             s = self.pool2(s)
