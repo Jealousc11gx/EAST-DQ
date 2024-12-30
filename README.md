@@ -1,2 +1,2 @@
-# EAST-DQ
-A SNN Quantization Aware Training Framework with Skyrmion Devices
+#QUEST: A Quantized Energy-Aware SNN Training
+Framework for Multi-State Neuromorphic Devices
